@@ -126,3 +126,20 @@ Service-provider designs with VPWS and pseudowire redundancy, such as ICCP-based
           | Uses active link   |
           |       only         |
           +--------------------+
+
+## Glossary
+### Split Brain
+Split brain is when both MLAG peers lose contact with each other but both stay up, and each assumes the other is dead and acts as the sole primary.
+#### How it happens: 
+The link used for state sync (the IDL in your document) fails, and the backup path (the IDP, or a keepalive) is also down or was never configured.
+#### Why it’s dangerous:
+Both peers present the same LACP system ID to the remote device, but they no longer share MAC, ARP, or LACP state.
+The remote device keeps sending traffic on all its links, and each peer forwards based on its own incomplete view.
+This causes duplicate frames, MAC flapping, flooding, loops, blackholed traffic, and (at L3) duplicate gateway or IP conflicts.
+#### How it’s prevented or handled:
+A second, independent path for health checks (this is the IDP), which can run over the eth0 out-of-band management interface or be routed in-band over L3. 
+If the IDL fails but the IDP still works, the peers know the other node is alive and can decide who keeps forwarding. 
+This is the main reason the IDP exists.
+A deterministic rule for who stays active. The secondary shuts down or suspends its MLAG ports, and the primary keeps forwarding.
+Redundant IDL members. A multi-link bundle makes a total IDL failure unlikely.
+
