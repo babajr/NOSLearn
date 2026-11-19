@@ -39,24 +39,28 @@ Hence, data traffic loss is expected, in case of MLAG interface failure.
 | **On MLAG interface failure** | Traffic is redirected to the peer over the IDL, so no loss | Traffic is lost, because there is no data path |
 
 ## Topology
-                +--------------------+
-                |  Upstream network  |
-                +--------------------+
-                   /              \
-  +---------------/----------------\---------------+
-  |  MCEC domain (one logical node)                |
-  |  +----------+                  +------------+  |
-  |  | Peer A   |====== IDL =======| Peer B     |  |
-  |  | Primary  |- - - - IDP - - - | Secondary  |  |
-  |  +----------+                  +------------+  |
-  +-------\---------------------------/------------+
-           \                         /
-            \___ one LAG (2 links) _/
-                  +-----------------+
-                  |  Remote device  |
-                  | Runs standard   |
-                  |      LAG        |
-                  +-----------------+
+                 +-------------------+
+                 | Upstream network  |
+                 +-------------------+
+                           |
+            +--------------+--------------+
+            |                             |
++-----------+-----------------------------+-----------+
+|           |  MCEC domain (single node)  |           |
+|           |                             |           |
+|     +-----------+                 +-----------+     |
+|     |  Peer A   | ===== IDL ===== |  Peer B   |     |
+|     |  Primary  | - - - IDP - - - | Secondary |     |
+|     +-----------+                 +-----------+     |
+|           |                             |           |
++-----------+-----------------------------+-----------+
+            |                             |
+            |      one LAG (2 links)      |
+            |                             |
+        +-------------------------------------+
+        |            Remote device            |
+        |          Runs standard LAG          |
+        +-------------------------------------+
 
 ## MLAG Modes
 MLAG can be configured in MLAG Active-Active or MLAG Active-Standby modes.
