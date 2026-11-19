@@ -37,3 +37,88 @@ Hence, data traffic loss is expected, in case of MLAG interface failure.
 | **Carries data traffic?** | Yes | No, control only |
 | **Interconnect** | Dedicated link between peers | The `eth0` out-of-band management interface, or routed in-band over an L3 network |
 | **On MLAG interface failure** | Traffic is redirected to the peer over the IDL, so no loss | Traffic is lost, because there is no data path |
+
+## Topology
+                +--------------------+
+                |  Upstream network  |
+                +--------------------+
+                   /              \
+  +---------------/----------------\---------------+
+  |  MCEC domain (one logical node)                |
+  |  +----------+                  +------------+  |
+  |  | Peer A   |====== IDL =======| Peer B     |  |
+  |  | Primary  |- - - - IDP - - - | Secondary  |  |
+  |  +----------+                  +------------+  |
+  +-------\---------------------------/------------+
+           \                         /
+            \___ one LAG (2 links) _/
+                  +-----------------+
+                  |  Remote device  |
+                  | Runs standard   |
+                  |      LAG        |
+                  +-----------------+
+
+## MLAG Modes
+MLAG can be configured in MLAG Active-Active or MLAG Active-Standby modes.
+Both modes use the same building blocks: two peers, one logical LAG endpoint, and state sync between them.
+The difference is which peer’s links carry traffic at the same time.
+
+### MLAG Active-Active
+Both peers forward traffic simultaneously. The remote device sees one LACP partner and hashes flows across all member links,
+so some flows go to peer A and some to peer B.
+#### Bandwidth: 
+All links are used, with no idle capacity.
+#### Failover:
+If one peer or its links fail, the remote LAG just stops hashing onto those links. Convergence is very fast, often sub-second.
+#### Requirements:
+The peers must synchronize MAC tables (and ARP/ND for L3 designs) and share a common LACP system ID. 
+They also need split-brain protection, and the peer link must be sized for traffic that arrives on one peer but exits through the other.
+#### Typical use:
+Data center L2 and L3 designs (Arista MLAG, Cisco vPC, Cumulus), usually paired with VRRP or an anycast gateway.
+#### Topology
+          +--------------------+
+          |  Upstream network  |
+          +--------------------+
+             ||            ||
+        +----------+   +----------+
+        | Peer A   |<->| Peer B   |
+        |Forwarding|IDL|Forwarding|
+        +----------+   +----------+
+             ||            ||
+           Active        Active
+              \\          //
+          +--------------------+
+          |   Remote device    |
+          | Hashes flows to    |
+          |       both         |
+          +--------------------+
+
+### MLAG Active-Standby
+Only one peer’s links actively carry traffic for a given LAG or service. The other peer’s links are up but held in standby
+(for example, in an LACP standby or out-of-sync state) until the active side fails.
+#### Bandwidth:
+Only the active links forward, so standby capacity sits idle.
+#### Failover:
+The standby peer takes over when the active peer or links fail. 
+Convergence is usually slower than active-active, because LACP has to re-sync and the standby has to bring its links into forwarding.
+#### Simplicity:
+Since only one side forwards at a time, there is less risk of loops, duplicate frames, and MAC-flapping. State sync is also simpler.
+#### Typical use:
+Service-provider designs with VPWS and pseudowire redundancy, such as ICCP-based MC-LAG, where deterministic behavior matters more than using every link.
+#### Topology
+          +--------------------+
+          |  Upstream network  |
+          +--------------------+
+             ||            :
+        +----------+   +- - - - - -+
+        | Peer A   |<=>| Peer B    |
+        | Active   |IDL| Standby   |
+        +----------+   +- - - - - -+
+             ||            :
+           Active       Standby
+              \\          :
+          +--------------------+
+          |   Remote device    |
+          | Uses active link   |
+          |       only         |
+          +--------------------+
