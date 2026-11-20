@@ -7,7 +7,8 @@ How LACP (IEEE 802.1AX, originally 802.3ad) works internally, explained with one
 
 ## Contents
 
-- [What LACP does](#what-lacp-does)
+- [What is LACP and where it is used](#what-is-lacp-and-where-it-is-used)
+- [What LACP does on each port](#what-lacp-does-on-each-port)
 - [The LACPDU](#the-lacpdu)
 - [Timers](#timers)
 - [The example](#the-example)
@@ -20,7 +21,88 @@ How LACP (IEEE 802.1AX, originally 802.3ad) works internally, explained with one
 - [Interview questions](#interview-questions)
 - [Common mistakes](#common-mistakes)
 
-## What LACP does
+## What is LACP and where it is used
+
+### Definition
+
+**LACP (Link Aggregation Control Protocol)** is the control protocol that builds and maintains a LAG automatically.
+Two switches (or a server and a switch) exchange small LACP messages (LACPDUs) over each physical link to agree which links belong to the same bundle, 
+and keep checking that each link is still healthy.
+
+- LACP only **controls** the bundle. It does not carry user data and it does not balance traffic. Load balancing is a separate hash that
+  each side applies when transmitting.
+- A LAG is the result. LACP is one way to build it. The other is a static LAG (see the separate LAG notes), where nothing is negotiated.
+
+### Standard and history
+
+| Year | Event |
+|---|---|
+| March 2000 | The 802.3ad clause was added to IEEE 802.3 |
+| 3 November 2008 | The protocol moved to the 802.1 group as IEEE 802.1AX-2008 |
+| 2020 | Latest revision, IEEE 802.1AX-2020, approved 30 January 2020 |
+
+The standard defines aggregating parallel **full-duplex point-to-point** links into a group that the layer above treats as one link. The member links must be full duplex and have identical speed. Many people still say "802.3ad" for LACP, which is the old name.
+
+### What LACP adds over a static LAG
+
+- It detects wrong cabling or a wrong partner, because both ends must agree on the system ID and key before a link joins.
+- It removes a failed link from the bundle automatically, including a silent failure that link state does not show.
+- It tracks the health of every member while the LAG is up.
+- It lets you hold spare links in standby, using port priority, so that they join only when an active link fails.
+
+The trade-off is a little more complexity, and some low-end devices do not support LACP.
+
+### Where it is used
+
+| Place | Typical example | Why LACP |
+|---|---|---|
+| Switch to switch | Access to distribution, distribution to core, leaf to spine | More bandwidth and redundancy between two switches, with STP seeing one link |
+| Server or storage to switch | A server with two or more NICs bonded to a top-of-rack switch | Server survives a NIC or cable failure, and uses all NICs |
+| Server to a pair of switches | One NIC to each of two switches that run MLAG | Survives a whole switch failure. The server sees one LACP partner |
+| Appliance to network | Firewall, load balancer or SD-WAN box uplinked to the core | Same: bandwidth plus failure handling |
+| Backbone upgrade | Using extra cabling that is already installed | More capacity without buying a faster port |
+| Between MLAG peers | The link that connects the two MLAG switches is commonly built as a LAG too † | Same benefits, on the peer link |
+
+Examples from specific platforms: Linux bonds use the 802.3ad mode for LACP, and hypervisor virtual switches (for example a VMware distributed switch) can run LACP toward the physical switches. †
+
+### Example: a dual-homed server
+
+```mermaid
+flowchart TB
+    UP["Upstream network"]
+    subgraph PAIR["MLAG pair (one LACP partner)"]
+        T1["ToR switch 1"]
+        T2["ToR switch 2"]
+    end
+    SRV["Server<br/>2 NICs in one LACP bond"]
+    UP --- T1
+    UP --- T2
+    T1 ===|"NIC 1"| SRV
+    T2 ===|"NIC 2"| SRV
+```
+
+How it works:
+
+1. The two switches present the **same LACP system ID** to the server, so the server sees both of its links going to one partner.
+2. Both links are active at once. In the NVIDIA cluster design this is contrasted with active/standby bonding, which leaves half the uplink bandwidth unused.
+3. If one switch fails, the server keeps working over the other link.
+4. The gateway also needs redundancy (VRRP or an equivalent), otherwise the default gateway is still a single point of failure.
+
+**A practical catch with servers:** a server that boots over the network (PXE) cannot negotiate LACP until its operating system is running. Some switch platforms offer an LACP bypass or fallback mode that lets one member forward before negotiation completes. NVIDIA's Cumulus design uses this for PXE provisioning. Check how your platform names and handles it.
+
+### Where LACP is not the right tool
+
+| Situation | Why |
+|---|---|
+| You want one transfer to go faster than one link | A single flow stays on one member, so it is capped at that link's speed |
+| The two ends are independent switches with no MLAG or stacking | Classic LACP cannot span independent switches |
+| The peer does not support LACP | Use a static LAG, and accept that nothing checks the other end |
+| Members differ in speed or duplex | The standard requires identical speed and full duplex |
+| You need complete high availability | A LAG alone is not complete HA. The gateway, the switches and the paths above also matter |
+
+Some designs use separate routed links with ECMP instead of a LAG. †
+
+## What LACP does on each port
 
 LACP runs per member port. For every port it answers three questions:
 
@@ -67,9 +149,6 @@ One byte of state is sent in the actor and partner blocks. OcNOS shows the same 
 | 0x20 | DIS | Distributing: the port is used for outgoing frames |
 | 0x40 | DEF | Defaulted: partner information is a default, nothing was received |
 | 0x80 | EXP | Expired: the last partner information has timed out |
-
-> [!NOTE]
-> The OcNOS command reference lists `EXP` as "Defaulted" in its table, which looks like a documentation error. The bit position and the field name match Expired.
 
 ### State values you will recognize
 
@@ -404,6 +483,18 @@ These are operational practices, not requirements from the standard.
 4. Re-enable the port if you want to reuse it elsewhere.
 
 ## Interview questions
+
+**What is LACP?**
+The control protocol of IEEE 802.1AX (originally 802.3ad) that negotiates and monitors a LAG. Both ends exchange LACPDUs to agree which links bundle and to catch failures and mismatches.
+
+**Where is LACP used?**
+Switch-to-switch uplinks, servers and storage bonded to top-of-rack switches, firewalls and load balancers uplinked to the core, and, together with MLAG, servers connected to two switches.
+
+**Does LACP load balance traffic?**
+No. LACP only decides which links are in the bundle. Each side balances the traffic it sends with a hash, and the hash fields are configured separately.
+
+**Why use LACP instead of a static LAG?**
+LACP detects wrong cabling and a wrong partner, removes a failed link automatically, and keeps checking every member. A static LAG relies on link state only.
 
 **How does a physical port become part of a LAG with LACP?**
 It exchanges LACPDUs with the partner, records the partner's system ID and key, gets matched when the partner echoes its own information back, is selected into the aggregator, waits the 2 second aggregate wait, attaches and sets SYN, and then enables collecting and distributing once the partner is in sync.
