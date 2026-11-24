@@ -7,6 +7,7 @@
  *   - tail position is derived: (head + size) % capacity
  *
  * All operations are O(1) time, O(k) space.
+ * For Concurrent Model: refer https://book-of-gehn.github.io/articles/2020/03/22/Lock-Free-Queue-Part-I.html
  */
 
 #include <stdio.h>
