@@ -2,6 +2,7 @@
 
 ## Contents
 
+- [Key terms explained (read this first)](#key-terms-explained-read-this-first)
 - [1. Storage classes in C](#1-storage-classes-in-c)
 - [2. A process's virtual memory map](#2-a-processs-virtual-memory-map)
 - [3. Scope](#3-scope)
@@ -10,6 +11,111 @@
 - [6. Interview questions with model answers](#6-interview-questions-with-model-answers)
 - [7. Code puzzles with explanations](#7-code-puzzles-with-explanations)
 - [8. The protocol-developer angle (Senior / Staff follow-ups)](#8-the-protocol-developer-angle-senior--staff-follow-ups)
+
+## Key terms explained (read this first)
+
+Every term used later in the notes is defined here in plain words. If a sentence further down feels dense, come back to this table.
+
+### The core ideas
+
+| Term | Plain-English meaning | Tiny example |
+| --- | --- | --- |
+| **Object** | A piece of memory that holds a value (a variable, an array, a struct). | `int x;` creates an object that holds an int. |
+| **Identifier / name** | The label you write in source code to refer to an object or function. | `x`, `main`, `rx_pkts` |
+| **Translation unit (TU)** | One `.c` file after the preprocessor has pasted in all its `#include`d headers. The compiler works on one TU at a time. | `stats.c` plus the headers it includes |
+| **Declaration** | Tells the compiler "this name exists and has this type". No memory is reserved. | `extern int x;`  `int f(void);` |
+| **Definition** | A declaration that also reserves memory (for a variable) or supplies the body (for a function). | `int x;`  `int f(void){ return 1; }` |
+| **Storage class specifier** | A keyword (`auto`, `register`, `static`, `extern`, `_Thread_local`) that changes lifetime, visibility or linkage of what you declare. | `static int count;` |
+| **Storage duration (lifetime)** | *How long the object exists at run time.* | See the four kinds below. |
+| **Scope** | *Where in the source code the name can be used.* A compile-time idea about names. | A local variable is usable only inside its `{ }`. |
+| **Linkage** | *Whether the same name in different `.c` files refers to the same thing.* The linker decides this. | A global `int x;` in two files is one shared variable. |
+| **Symbol** | The name of a function or global variable as stored in the compiled `.o` file, which the linker matches up. | `nm a.out` lists symbols. |
+| **Linker** | The tool that joins all `.o` files and libraries into one program and connects each use of a symbol to its definition. | `ld`, run by `gcc` |
+
+### The four storage durations
+
+| Duration | Object exists... | Typical example |
+| --- | --- | --- |
+| **Automatic** | From entering the block to leaving it. Created and destroyed for you. | Ordinary local variables |
+| **Static** | For the whole run of the program. Set up before `main` starts. | Globals, `static` locals |
+| **Thread** | For the whole life of one thread; each thread has its own copy. | `_Thread_local` variables |
+| **Allocated** | From `malloc` until you call `free`. You control it. | `int *p = malloc(64);` |
+
+### The three kinds of linkage
+
+| Linkage | Meaning | How you get it |
+| --- | --- | --- |
+| **External** | One shared entity visible to every `.c` file. | A global variable or function with no `static` |
+| **Internal** | Shared only inside one `.c` file; hidden from the others. | A global marked `static` |
+| **None** | Not shared at all; each declaration is its own separate thing. | Local variables, parameters |
+
+### Values and behaviour words
+
+| Term | Plain-English meaning |
+| --- | --- |
+| **Indeterminate value** | "Whatever garbage happened to be in that memory." Local variables start this way until you assign them. Reading one is a bug. |
+| **Zero-initialised** | Set to 0 (or null pointer, 0.0) automatically before the program starts. Applies to globals and `static` variables. |
+| **Undefined behaviour (UB)** | The C standard puts no rules on what happens. The program may crash, print garbage, or seem to work today and fail tomorrow. Examples: reading an uninitialised local, writing to a string literal, using a dangling pointer. |
+| **Constant expression** | A value the compiler can compute while compiling, such as `5` or `2 * 8`. A normal variable, even a `const` one, is not one in C. Initialisers of globals and `static` variables must be constant expressions. |
+| **Tentative definition** | A file-scope `int x;` with no initialiser. It acts as a definition if no other definition appears; older compilers merged duplicates across files, newer GCC (10+) reports an error. |
+| **Dangling pointer** | A pointer to memory that no longer holds a live object, for example the address of a local variable after its function returned. |
+| **Shadowing** | An inner variable with the same name hides an outer one inside the inner block. |
+
+### Memory-map words
+
+| Term | Plain-English meaning |
+| --- | --- |
+| **Virtual memory** | Each process sees its own private block of addresses. The CPU's MMU and the OS translate those virtual addresses to real RAM behind the scenes. Two processes can both use address `0x1000` without clashing. |
+| **MMU / page table** | The hardware and the OS data structure that perform and record that translation. |
+| **Page** | The unit of memory the OS manages, usually 4 KiB. Permissions (read, write, execute) are set per page. |
+| **Demand paging** | A page gets real RAM only when the program first touches it. |
+| **Segment / section** | A named region of the program image or address space. `.text`, `.rodata`, `.data` and `.bss` are sections of the executable file. |
+| **`.text`** | The machine code. Read and execute, not write. |
+| **`.rodata`** | Read-only data: string literals and `const` globals. |
+| **`.data`** | Global and `static` variables that start with a non-zero value. Read and write. Stored in the file. |
+| **`.bss`** | Global and `static` variables that start at zero. The file stores only their total size, so they cost no file space. |
+| **Stack** | Memory for local variables, function arguments and return addresses. Grows downward. Each call adds a *frame*; returning removes it. Fast, but small. |
+| **Heap** | Memory you request with `malloc` and release with `free`. Grows upward from the end of `.bss`. |
+| **`mmap` region** | Area between heap and stack where shared libraries, memory-mapped files, large `malloc` blocks and thread stacks are placed. |
+| **Program break (`brk`)** | The current end of the heap. `malloc` moves it with `brk`/`sbrk` for small requests. |
+| **Guard page** | An unmapped page placed beside a stack so that overflowing it causes an immediate crash instead of silent corruption. |
+| **Copy-on-write (COW)** | After `fork()`, parent and child share the same physical pages. A page is copied only when one of them writes to it. |
+| **ASLR** | Address Space Layout Randomisation: the OS puts the stack, heap and libraries at random addresses on each run, making attacks harder. |
+| **PIE** | Position-Independent Executable: a program built so it can be loaded at any address, which allows ASLR to move the program itself. |
+| **W^X / NX** | A page may be writable or executable but not both, which blocks running injected code. |
+| **ELF** | The executable and object-file format used on Linux. |
+| **PLT / GOT** | Tables used for calling functions in shared libraries. The PLT stub jumps through a GOT entry, which the dynamic linker fills in with the real address. |
+| **TLS** | Thread-Local Storage: the area that holds each thread's private copy of `_Thread_local` variables. |
+
+### Concurrency and systems words
+
+| Term | Plain-English meaning |
+| --- | --- |
+| **Reentrant** | A function that is safe to call again before an earlier call has finished (from a signal handler or another thread). It uses no shared static state. |
+| **Thread-safe** | Safe to call from several threads at once. A function using a `static` buffer is usually not. |
+| **Race condition** | A bug where the result depends on the timing of two threads touching the same data. |
+| **Atomic** | An operation that cannot be seen half-done by another thread (C11 `<stdatomic.h>`). |
+| **`volatile`** | Tells the compiler "this value can change outside your view (hardware, signal handler); do not skip or reorder reads and writes". It does **not** make code thread-safe. |
+| **Async-signal-safe** | A function that may be called from inside a signal handler, such as `write`. `malloc` and `printf` are not. |
+| **Cache line** | The unit (usually 64 bytes) in which the CPU moves memory in and out of its cache. |
+| **False sharing** | Two threads write different variables that sit on the same cache line, so the line bounces between cores and slows both. |
+| **Hugepage** | A large memory page (2 MiB or 1 GiB instead of 4 KiB) that reduces TLB misses for big tables. |
+| **TLB** | A small cache inside the CPU of recent address translations. A miss costs extra time. |
+| **NUMA** | Multi-socket machines where memory attached to one CPU is faster for that CPU than memory on another. |
+| **RSS** | Resident Set Size: how much real RAM a process is using right now. |
+| **RCU** | Read-Copy-Update: a technique that lets many readers use a table without locks while a writer swaps in a new version. |
+
+### Linker and library words
+
+| Term | Plain-English meaning |
+| --- | --- |
+| **Strong / weak symbol** | A normal definition is strong. A `weak` one is a default that a strong definition of the same name silently replaces. |
+| **Symbol interposition** | Another library or `LD_PRELOAD` supplies a function of the same name that gets called instead of the original. |
+| **Symbol visibility** | Whether a symbol in a shared library (`.so`) is exported to outsiders (`default`) or kept internal (`hidden`). |
+| **Shared library (`.so`)** | Code loaded at run time and shared between programs. |
+| **`dlopen`** | Loads a shared library while the program is running, used for plugins. |
+| **`extern "C"`** | C++ keyword that stops name mangling so C++ code can link with C symbols. |
+| **Inline function** | A function the compiler may expand in place of the call to save call overhead. |
 
 ## 1. Storage classes in C
 
@@ -20,13 +126,26 @@ Four storage durations exist: **automatic** (block entry to exit), **static** (w
 | Specifier | Duration | Scope | Linkage | Where it usually lives | Default value |
 | --- | --- | --- | --- | --- | --- |
 | `auto` (local default) | automatic | block | none | stack or a register | indeterminate |
-| `register` | automatic | block | none | register hint, `&` forbidden | indeterminate |
+| `register` | automatic | block | none | a CPU register if the compiler agrees (only a hint); you may not use `&` on it | indeterminate |
 | `static` inside a function | static | block | none | `.data` / `.bss` | zero |
 | `static` at file scope | static | file | internal | `.data` / `.bss` | zero |
 | `extern` | static | where declared | external (normally) | `.data` / `.bss` of the defining file | zero |
 | `_Thread_local` | thread | as declared | as declared | TLS (`.tdata` / `.tbss`) | zero |
 
 Placement in the table is how real toolchains behave, not something the standard mandates. The standard only guarantees duration, scope and linkage.
+
+### How to read each row in plain words
+
+| Row | What it means |
+| --- | --- |
+| `auto` | A normal local variable. Created when its block starts, destroyed when it ends, visible only inside that block, starts with garbage. |
+| `register` | A local variable where you ask the compiler to keep it in a fast CPU register. The compiler is free to ignore the request. The one rule it always enforces: you cannot take its address with `&`, because a register has no memory address. Otherwise it behaves exactly like `auto`. |
+| `static` inside a function | A local name whose value is remembered between calls. It is created once before `main`, lives until the program ends, and starts at 0. Only that function can name it. |
+| `static` at file scope | A global that is private to its `.c` file. Other files cannot see it, even if they declare the same name. |
+| `extern` | "This variable is defined in another file." It reserves no memory; it only lets this file use the name. |
+| `_Thread_local` | Like a global, but every thread gets its own private copy. |
+
+Column meanings: **Duration** is how long it exists, **Scope** is where its name works, **Linkage** is whether other files can share it, **Where it usually lives** is the memory region (see section 2), and **Default value** is what it holds before you assign anything.
 
 ### auto
 
@@ -115,13 +234,12 @@ High addresses
                     |  STACK                         |  automatic vars, return addrs,
                     |        |                       |  saved regs; grows DOWN
                     |        v                       |  (guard page below)
-                    |                                |
-                    |        ^                       |
-                    |        |                       |
+                    |         (large free gap)       |
                     |  MEMORY-MAPPED REGION          |  shared libs (libc.so), mmap(),
-                    |  (grows down, top-down layout) |  big malloc, thread stacks,
-                    |                                |  hugepages, shm
+                    |        |                       |  big malloc, thread stacks,
+                    |        v  (top-down layout)    |  hugepages, shm
                     |                                |
+                    |         (large free gap)       |
                     |        ^                       |
                     |        |                       |
                     |  HEAP (brk / sbrk)             |  small malloc/new; grows UP
@@ -139,7 +257,7 @@ High addresses
 Low addresses
 ```
 
-The stack and the mmap region grow toward each other, while the heap grows up toward the mmap region. In a 64-bit space they never meet in practice.
+With the modern top-down layout, the stack grows down from the top of user space, and the mmap region also grows downward, starting just below the stack. The heap grows up from the end of `.bss`. So the heap and the mmap region head toward each other, with a gap of many terabytes between them in a 64-bit space; they never meet in practice. (In the older bottom-up layout, mmap started low and grew up.)
 
 ### Segment by segment
 
@@ -249,7 +367,7 @@ int main(void) {
 }
 ```
 
-C has no `::` operator, so a shadowed global cannot be named from the inner block. Compile with `-Wshadow` to catch this. In C, the declaration also can't be re-declared in the same block (`int x; int x;` inside one block is an error), but a nested block is fine.
+C has no `::` operator. A shadowed global can still be reached from a nested block that has not declared its own `x`, by writing `extern int x;` there (see puzzle P2), but the better fix is to rename. Compile with `-Wshadow` to catch accidental shadowing. Declaring the same name twice in one block (`int x; int x;`) is an error; declaring it again in a nested block is fine.
 
 ### Scope of the declaration point
 
@@ -271,7 +389,7 @@ Labels are visible throughout their function, even before the label appears, so 
 A declaration outside any function is visible from that point to the end of the file, so order matters:
 
 ```c
-void g(void) { h(); }   // h not declared yet: C89 implied int f(), C99+ is an error/warning
+void g(void) { h(); }   // h not declared yet: "implicit declaration" (C89 allowed it; C99+ warns, newer GCC/Clang reject it)
 void h(void) { }
 ```
 
@@ -376,7 +494,7 @@ In `nm` output, uppercase letters are external symbols and lowercase letters are
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `undefined reference to 'x'` | declared (`extern`) but never defined, or the defining `.o` / library is missing from the link line | add the definition or the object |
-| `multiple definition of 'x'` | defined in two TUs, often `int x;` in a header included twice (`-fno-common`, default in GCC 10+) | `extern` in the header, one definition in a `.c` |
+| `multiple definition of 'x'` | defined in two TUs, often `int x;` in a header that two `.c` files include (an error by default since GCC 10, because of `-fno-common`) | `extern` in the header, one definition in a `.c` |
 | `static` variable in a header | no error, but every including TU gets its own private copy, so state is silently not shared | declare `extern` in the header |
 | Two TUs each define `static int x` | legal: two unrelated variables | none needed |
 
@@ -504,7 +622,7 @@ Each TU that includes it gets its own private copy, so "shared" state is silentl
 
 **Q17. How do dynamic libraries resolve calls (PLT and GOT)?**
 
-Calls to external functions go through a PLT stub that jumps via a GOT entry. With lazy binding, the first call enters the dynamic linker, which resolves the symbol and patches the GOT; later calls jump directly. `-Wl,-z,now` binds everything at load time, and full RELRO then makes the GOT read-only, a common hardening choice for routers and appliances.
+Calls to external functions go through a PLT stub that jumps via a GOT entry. With lazy binding, the first call enters the dynamic linker, which resolves the symbol and patches the GOT; later calls jump directly. `-Wl,-z,now` binds everything at load time, and full RELRO then makes the GOT read-only, a common hardening choice for network products.
 
 **Q18. What is symbol interposition, and how do you prevent it?**
 
@@ -516,7 +634,29 @@ A symbol with default visibility in a shared object may be overridden by another
 
 **Q20. Is a `static` local variable thread-safe?**
 
-No. Reads and writes are ordinary memory accesses, so concurrent callers race. Use `_Thread_local`, pass a context pointer, or protect with a lock or atomics. This is why POSIX has `_r` variants (`strtok_r`, `localtime_r`, `inet_ntop`).
+No. Reads and writes are ordinary memory accesses, so concurrent callers race. Use `_Thread_local`, pass a context pointer, or protect with a lock or atomics. This is why POSIX has `_r` variants such as `strtok_r` and `localtime_r`, and why `inet_ntop` (caller supplies the buffer) replaces `inet_ntoa` (returns a static buffer).
+
+### More frequently asked
+
+**Q21. What is a stack frame and what is in it?**
+
+Each function call gets a *frame* on the stack. It holds the return address, optionally the saved frame pointer (`rbp`), saved callee-saved registers, local variables, spilled arguments and padding to keep the stack 16-byte aligned at calls. On x86-64 System V the first six integer or pointer arguments are passed in `rdi`, `rsi`, `rdx`, `rcx`, `r8`, `r9` (floating-point in `xmm0` to `xmm7`) and the result comes back in `rax`, so many "locals" never touch the stack at all with optimisation on. Deep recursion or large locals exhaust the stack.
+
+**Q22. Is it safe to return a string literal from a function?**
+
+Yes. A string literal has static storage duration, so `const char *name(void) { return "eth0"; }` is fine. Compare puzzle P6, where the array is an automatic local. Return it as `const char *`, because modifying the literal is undefined behaviour.
+
+**Q23. Does `static` on a function change anything besides visibility?**
+
+Yes. Because no other file can call it, the compiler knows every call site: it can inline it, delete it if unused (and warn), and use cheaper calling conventions. It also avoids symbol clashes and keeps the dynamic symbol table small.
+
+**Q24. `const`, `#define` or `enum` for constants?**
+
+`#define` is textual, has no type and no scope. `enum` gives typed-ish integer constants with scope, usable in array sizes and `case` labels. A `const int` has a type and scope, but in C it is *not* a constant expression, so it cannot size a file-scope array or be a `case` label (C++ allows both). A `const` global in a header also has external linkage in C, so define it in one `.c` file, or use `static const` or `enum` in the header.
+
+**Q25. What is a memory leak vs a dangling pointer vs a double free?**
+
+A leak is allocated memory that is no longer reachable and never freed. A dangling pointer refers to memory whose lifetime has ended (freed heap block or returned local). A double free calls `free` twice on the same block and corrupts the allocator. Tools: Valgrind, AddressSanitizer (`-fsanitize=address`) and LeakSanitizer.
 
 ## 7. Code puzzles with explanations
 
@@ -610,7 +750,7 @@ int main(void) {
 }
 ```
 
-Typical ascending order: `main` (.text) < `"x"` (.rodata) < `&g_init` (.data) < `&g_bss` (.bss) < `h` (heap) < `&loc` (stack). With PIE and ASLR the whole executable and heap sit near `0x55...` and the stack near `0x7ff...`; the relative order holds, and the mmap region (libc) sits between heap and stack. Treat it as the usual layout, not a guarantee.
+Typical ascending order: `main` (.text) < `"x"` (.rodata) < `&g_init` (.data) < `&g_bss` (.bss) < `h` (heap) < `&loc` (stack). With PIE and ASLR the whole executable and heap sit near `0x55...` and the stack near `0x7ff...`; the relative order holds, and the mmap region (libc) sits between heap and stack. Treat it as the usual layout, not a guarantee. (Casting a function pointer to `void *` is a common GCC extension; strict ISO C does not define it.)
 
 **P8. A "shared" counter in a header.**
 
@@ -628,11 +768,11 @@ It prints `0`. `static` gives each including TU its own private `count`, and `a.
 **P9. Same function name in two files.**
 
 ```c
-// a.c: static void log(void){ puts("a"); }   void fa(void){ log(); }
-// b.c: static void log(void){ puts("b"); }   void fb(void){ log(); }
+// a.c: static void note(void){ puts("a"); }   void fa(void){ note(); }
+// b.c: static void note(void){ puts("b"); }   void fb(void){ note(); }
 ```
 
-Legal: internal linkage makes them two unrelated functions, and `fa` prints `a` while `fb` prints `b`. Remove `static` and the link fails with *multiple definition of `log`*. (Naming it `log` can also collide with the math library's declaration, so rename in real code.)
+Legal: internal linkage makes them two unrelated functions, and `fa` prints `a` while `fb` prints `b`. Remove `static` and the link fails with *multiple definition of `note`*. (Avoid names such as `log`, which clash with standard library functions.)
 
 **P10. Initialised vs uninitialised size.**
 
@@ -655,7 +795,9 @@ Globals in the fast path are shared mutable state: they need locks or atomics, a
 #include <stdalign.h>
 #include <stdint.h>
 
-struct alignas(64) stats { uint64_t rx, tx, drop; };   // sizeof == 64: one cache line
+// alignas on the first member makes the whole struct 64-byte aligned and padded to 64 bytes.
+struct stats { alignas(64) uint64_t rx; uint64_t tx, drop; };   // sizeof == 64: one cache line
+// GCC/Clang alternative: struct stats { uint64_t rx, tx, drop; } __attribute__((aligned(64)));
 
 // One cache line per core: no false sharing. Lives in .bss.
 static struct stats per_core[MAX_CORES];
@@ -669,7 +811,7 @@ uint64_t total_rx(void) {            // slow path: aggregate
 }
 ```
 
-The alignment goes on the struct type, so every array element is padded to a full 64-byte line. Putting `alignas(64)` on the array instead would align only its first element, and the 24-byte elements would still share lines. A reader summing the counters may see slightly stale values, which is acceptable for statistics. `_Thread_local` gives the same isolation per thread when threads are not pinned to cores.
+The alignment is part of the struct type, so every array element is padded to a full 64-byte line. Putting `alignas(64)` on the array instead would align only its first element, and the 24-byte elements would still share lines. (Writing `struct alignas(64) stats {...}` is only valid from C23, so the first-member form is the portable C11 spelling.) A reader summing the counters may see slightly stale values, which is acceptable for statistics. `_Thread_local` gives the same isolation per thread when threads are not pinned to cores.
 
 ### Memory in a long-running router process
 
@@ -677,7 +819,7 @@ The alignment goes on the struct type, so every array element is padded to a ful
 - **Hugepages (2 MiB or 1 GiB)** cut TLB misses for large FIB, MAC and flow tables; DPDK maps its pools this way and pins them so they are never swapped.
 - **NUMA**: memory is placed on the node of the thread that first touches it, so initialise a table from the core that will use it.
 - **Large static tables** in `.bss` cost no file space but are zero pages until touched; a `static const` lookup table lives in `.rodata` and is shared by every process running that image.
-- **Stacks are small.** A 9 KB jumbo-frame buffer as a local (`char pkt[9216]`) can overflow a 64 KiB or 256 KiB thread stack. Check with `-fstack-usage` and `-Wstack-usage=`, and avoid VLAs and `alloca` on untrusted lengths.
+- **Stacks are small.** A few 9 KB jumbo-frame buffers as locals (`char pkt[9216]`) in nested calls can exhaust a small 64 KiB or 256 KiB thread stack. Check with `-fstack-usage` and `-Wstack-usage=`, and avoid VLAs and `alloca` on untrusted lengths.
 
 ### Shared memory between processes
 
@@ -689,7 +831,10 @@ ftruncate(fd, SZ);
 void *base = mmap(NULL, SZ, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 
 struct route { uint32_t pfx, len; uint32_t next_off; };  // offset, not a pointer
-struct nh *nh = (struct nh *)((char *)base + r->next_off);
+struct nh { uint32_t addr, ifindex; };
+
+// r points at a struct route that lives inside the mapping
+struct nh *nh = (struct nh *)((char *)base + r->next_off);   // rebuild the pointer locally
 ```
 
 Also: put a version and a lock (robust process-shared mutex or a seqlock) in the header, and remember that a crashed writer can leave the data half-updated.
@@ -698,7 +843,7 @@ Also: put a version and a lock (robust process-shared mutex or a seqlock) in the
 
 - `volatile` tells the compiler that every access is observable: right for memory-mapped device registers (`volatile uint32_t *reg = (void *)0xF0000000;`) and for a flag set from a signal handler (`volatile sig_atomic_t`).
 - It is **not** a synchronisation primitive: it gives no atomicity and no ordering between threads. Use C11 `<stdatomic.h>` or memory barriers. To the question "is `volatile` enough for a shared counter?" the answer is no.
-- A signal handler or ISR may only call async-signal-safe functions. No `malloc`, `printf` or locks, because the interrupted code may be inside them holding a static lock.
+- A signal handler or ISR may only call async-signal-safe functions. No `malloc`, `printf` or locks: the interrupted code may already be inside `malloc` holding its internal lock, so the handler would deadlock or corrupt state.
 - `static` data written by a handler and read by the main loop needs `sig_atomic_t` or an atomic type.
 
 ### Self-registration tables with linker sections
