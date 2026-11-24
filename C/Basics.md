@@ -1,9 +1,5 @@
 # C Storage Classes, Virtual Memory Map, Scope & Linkage
 
-_Last updated: 2026-11-24_
-
-Interview-ready notes for Senior/Staff Network Protocol Developer roles (Cisco, HPE, Juniper, Arista, Extreme): the four concepts, how they map onto a process's memory, and the questions that actually get asked.
-
 ## Contents
 
 - [1. Storage classes in C](#1-storage-classes-in-c)
